@@ -110,7 +110,8 @@ def edit_contact():
 if __name__=='__main__':
    main()
                           
-#include <stdio.h>
+
+  #include <stdio.h>
 #include <string.h>
 #include <time.h>    // 核心头文件
 #include <stdlib.h>
@@ -134,7 +135,7 @@ int main(int argc, char *argv[])
     {
         sscanf(argv[1], "%c%c", &c1, &c2);
         if(c1 != '-') return 0;
-        
+
         if(c2 == 's')
         {
             func_B();
@@ -186,13 +187,13 @@ void func_C(int internal, int duration) {
             system("cat /proc/loadavg | cut -d ' ' -f 1"); // 打印负载
             last_sample_time = current_time;               // 更新采样时间
         }
-        
+
         // 注意：这里没有 sleep，CPU 会在这里拼命循环检查时间
     }
     printf("监控结束。\n");
 }
 
-             
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -348,9 +349,3 @@ int main(int argc, char *argv[]) {
     }
     return 0;
 }
-
-        
-
-           
-           
-
