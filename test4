@@ -1,0 +1,443 @@
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+#define N_PROCESS 5
+#define TIME_SLICE 2
+#define MIN_PRIORITY 1
+#define MAX_PRIORITY 5
+
+#define TASK_WAITING 0
+#define TASK_READY 1
+#define TASK_RUNNING 2
+#define TASK_DONE 3
+
+int process[N_PROCESS][2] = {
+    {0, 3},
+    {2, 6},
+    {4, 4},
+    {6, 5},
+    {8, 2}
+};
+
+struct task_struct {
+    long pid;
+    long state;
+    long priority;
+    long counter;
+    long start_time;
+    long excute_time;
+    long remain_time;
+    long finish_time;
+};
+
+struct run_q {
+    struct task_struct *data;
+    struct run_q *next;
+};
+
+static void init_tasks(struct task_struct tasks[], int use_random_priority)
+{
+    int i;
+
+    for (i = 0; i < N_PROCESS; i++) {
+        tasks[i].pid = i + 1;
+        tasks[i].state = TASK_WAITING;
+        tasks[i].priority = use_random_priority
+            ? (rand() % (MAX_PRIORITY - MIN_PRIORITY + 1) + MIN_PRIORITY)
+            : 0;
+        tasks[i].counter = tasks[i].priority;
+        tasks[i].start_time = process[i][0];
+        tasks[i].excute_time = process[i][1];
+        tasks[i].remain_time = process[i][1];
+        tasks[i].finish_time = 0;
+    }
+}
+
+static void print_tasks(const struct task_struct tasks[], int show_priority)
+{
+    int i;
+
+    if (show_priority) {
+        printf("task id   start  excute  priority  counter\n");
+        for (i = 0; i < N_PROCESS; i++) {
+            printf("task %2ld: %6ld %7ld %9ld %8ld\n",
+                   tasks[i].pid,
+                   tasks[i].start_time,
+                   tasks[i].excute_time,
+                   tasks[i].priority,
+                   tasks[i].counter);
+        }
+    } else {
+        printf("task id   start  excute\n");
+        for (i = 0; i < N_PROCESS; i++) {
+            printf("task %2ld: %6ld %7ld\n",
+                   tasks[i].pid,
+                   tasks[i].start_time,
+                   tasks[i].excute_time);
+        }
+    }
+    printf("\n");
+}
+
+static long min_long(long a, long b)
+{
+    return a < b ? a : b;
+}
+
+static long next_arrival_time(const struct task_struct tasks[], long now)
+{
+    int i;
+    long next = LONG_MAX;
+
+    for (i = 0; i < N_PROCESS; i++) {
+        if (tasks[i].remain_time > 0 && tasks[i].start_time > now) {
+            next = min_long(next, tasks[i].start_time);
+        }
+    }
+    return next;
+}
+
+static void print_summary(const struct task_struct tasks[])
+{
+    int i;
+    double avg_turnaround = 0.0;
+    double avg_weighted = 0.0;
+
+    printf("\nresult:\n");
+    printf("task id   finish  turnaround  weighted turnaround\n");
+    for (i = 0; i < N_PROCESS; i++) {
+        long turnaround = tasks[i].finish_time - tasks[i].start_time;
+        double weighted = (double)turnaround / tasks[i].excute_time;
+
+        avg_turnaround += turnaround;
+        avg_weighted += weighted;
+        printf("task %2ld: %7ld %11ld %20.2f\n",
+               tasks[i].pid,
+               tasks[i].finish_time,
+               turnaround,
+               weighted);
+    }
+
+    printf("average turnaround: %.2f\n", avg_turnaround / N_PROCESS);
+    printf("average weighted turnaround: %.2f\n\n", avg_weighted / N_PROCESS);
+}
+
+static void enqueue(struct run_q **tail, struct run_q *node)
+{
+    if (*tail == NULL) {
+        node->next = node;
+        *tail = node;
+    } else {
+        node->next = (*tail)->next;
+        (*tail)->next = node;
+        *tail = node;
+    }
+}
+
+static struct run_q *dequeue(struct run_q **tail)
+{
+    struct run_q *head;
+
+    if (*tail == NULL) {
+        return NULL;
+    }
+
+    head = (*tail)->next;
+    if (head == *tail) {
+        *tail = NULL;
+    } else {
+        (*tail)->next = head->next;
+    }
+    head->next = NULL;
+    return head;
+}
+
+static void add_rr_arrivals(struct task_struct tasks[],
+                            struct run_q nodes[],
+                            struct run_q **tail,
+                            long now)
+{
+    int i;
+
+    for (i = 0; i < N_PROCESS; i++) {
+        if (tasks[i].state == TASK_WAITING && tasks[i].start_time <= now) {
+            tasks[i].state = TASK_READY;
+            nodes[i].data = &tasks[i];
+            nodes[i].next = NULL;
+            enqueue(tail, &nodes[i]);
+        }
+    }
+}
+
+static void schedule_f(void)
+{
+    struct task_struct tasks[N_PROCESS];
+    long now = 0;
+    int done_count = 0;
+
+    init_tasks(tasks, 0);
+    printf("\nFCFS schedule\n");
+    print_tasks(tasks, 0);
+
+    while (done_count < N_PROCESS) {
+        int i;
+        int best = -1;
+
+        for (i = 0; i < N_PROCESS; i++) {
+            if (tasks[i].remain_time > 0 && tasks[i].start_time <= now) {
+                if (best == -1 ||
+                    tasks[i].start_time < tasks[best].start_time ||
+                    (tasks[i].start_time == tasks[best].start_time &&
+                     tasks[i].pid < tasks[best].pid)) {
+                    best = i;
+                }
+            }
+        }
+
+        if (best == -1) {
+            long next = next_arrival_time(tasks, now);
+            if (next == LONG_MAX) {
+                break;
+            }
+            printf("time %2ld -> %2ld: CPU idle\n", now, next);
+            now = next;
+            continue;
+        }
+
+        printf("time %2ld -> %2ld: task %ld runs\n",
+               now,
+               now + tasks[best].remain_time,
+               tasks[best].pid);
+        now += tasks[best].remain_time;
+        tasks[best].remain_time = 0;
+        tasks[best].finish_time = now;
+        tasks[best].state = TASK_DONE;
+        done_count++;
+    }
+
+    print_summary(tasks);
+}
+
+static void schedule_r(void)
+{
+    struct task_struct tasks[N_PROCESS];
+    struct run_q nodes[N_PROCESS];
+    struct run_q *tail = NULL;
+    long now = 0;
+    int done_count = 0;
+
+    init_tasks(tasks, 0);
+    printf("\nRR schedule, time slice = %d\n", TIME_SLICE);
+    print_tasks(tasks, 0);
+
+    while (done_count < N_PROCESS) {
+        struct run_q *node;
+        struct task_struct *task;
+        long run_time;
+
+        add_rr_arrivals(tasks, nodes, &tail, now);
+
+        if (tail == NULL) {
+            long next = next_arrival_time(tasks, now);
+            if (next == LONG_MAX) {
+                break;
+            }
+            printf("time %2ld -> %2ld: CPU idle\n", now, next);
+            now = next;
+            continue;
+        }
+
+        node = dequeue(&tail);
+        task = node->data;
+        task->state = TASK_RUNNING;
+        run_time = min_long(TIME_SLICE, task->remain_time);
+
+        printf("time %2ld -> %2ld: task %ld runs, remain %ld -> %ld\n",
+               now,
+               now + run_time,
+               task->pid,
+               task->remain_time,
+               task->remain_time - run_time);
+
+        now += run_time;
+        task->remain_time -= run_time;
+
+        add_rr_arrivals(tasks, nodes, &tail, now);
+
+        if (task->remain_time == 0) {
+            task->state = TASK_DONE;
+            task->finish_time = now;
+            done_count++;
+        } else {
+            task->state = TASK_READY;
+            enqueue(&tail, node);
+        }
+    }
+
+    print_summary(tasks);
+}
+
+static void update_priority_arrivals(struct task_struct tasks[], long now)
+{
+    int i;
+
+    for (i = 0; i < N_PROCESS; i++) {
+        if (tasks[i].state == TASK_WAITING && tasks[i].start_time <= now) {
+            tasks[i].state = TASK_READY;
+        }
+    }
+}
+
+static int has_arrived_unfinished(const struct task_struct tasks[], long now)
+{
+    int i;
+
+    for (i = 0; i < N_PROCESS; i++) {
+        if (tasks[i].remain_time > 0 && tasks[i].start_time <= now) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int pick_priority_task(const struct task_struct tasks[], long now)
+{
+    int i;
+    int best = -1;
+
+    for (i = 0; i < N_PROCESS; i++) {
+        if (tasks[i].remain_time > 0 &&
+            tasks[i].start_time <= now &&
+            tasks[i].counter > 0) {
+            if (best == -1 ||
+                tasks[i].counter > tasks[best].counter ||
+                (tasks[i].counter == tasks[best].counter &&
+                 tasks[i].priority > tasks[best].priority) ||
+                (tasks[i].counter == tasks[best].counter &&
+                 tasks[i].priority == tasks[best].priority &&
+                 tasks[i].pid < tasks[best].pid)) {
+                best = i;
+            }
+        }
+    }
+
+    return best;
+}
+
+static void recalc_counters(struct task_struct tasks[], long now)
+{
+    int i;
+
+    printf("time %2ld: recalculate counters\n", now);
+    for (i = 0; i < N_PROCESS; i++) {
+        if (tasks[i].remain_time > 0 && tasks[i].start_time <= now) {
+            long old_counter = tasks[i].counter;
+            tasks[i].counter = tasks[i].counter / 2 + tasks[i].priority;
+            printf("    task %ld counter %ld -> %ld\n",
+                   tasks[i].pid,
+                   old_counter,
+                   tasks[i].counter);
+        }
+    }
+}
+
+static void schedule_p(void)
+{
+    struct task_struct tasks[N_PROCESS];
+    long now = 0;
+    int done_count = 0;
+
+    init_tasks(tasks, 1);
+    printf("\nPriority schedule\n");
+    print_tasks(tasks, 1);
+
+    while (done_count < N_PROCESS) {
+        int best;
+        struct task_struct *task;
+
+        update_priority_arrivals(tasks, now);
+        best = pick_priority_task(tasks, now);
+
+        if (best == -1) {
+            if (has_arrived_unfinished(tasks, now)) {
+                recalc_counters(tasks, now);
+                continue;
+            } else {
+                long next = next_arrival_time(tasks, now);
+                if (next == LONG_MAX) {
+                    break;
+                }
+                printf("time %2ld -> %2ld: CPU idle\n", now, next);
+                now = next;
+                continue;
+            }
+        }
+
+        task = &tasks[best];
+        task->state = TASK_RUNNING;
+        printf("time %2ld -> %2ld: task %ld runs, counter %ld -> %ld, remain %ld -> %ld\n",
+               now,
+               now + 1,
+               task->pid,
+               task->counter,
+               task->counter - 1,
+               task->remain_time,
+               task->remain_time - 1);
+
+        now++;
+        task->counter--;
+        task->remain_time--;
+
+        if (task->remain_time == 0) {
+            task->state = TASK_DONE;
+            task->finish_time = now;
+            done_count++;
+        } else {
+            task->state = TASK_READY;
+        }
+    }
+
+    print_summary(tasks);
+}
+
+int main(void)
+{
+    char choice;
+    void (*schedule)(void);
+
+    srand((unsigned int)time(NULL));
+
+    while (1) {
+        printf("please choice the schedule measure:\n");
+        printf("p : priority-based schedule\n");
+        printf("f : FCFS schedule\n");
+        printf("r : RR schedule\n");
+        printf("q : quit\n");
+        printf("choice = ");
+
+        if (scanf(" %c", &choice) != 1) {
+            return 0;
+        }
+
+        switch (choice) {
+        case 'p':
+            schedule = schedule_p;
+            break;
+        case 'f':
+            schedule = schedule_f;
+            break;
+        case 'r':
+            schedule = schedule_r;
+            break;
+        case 'q':
+            return 0;
+        default:
+            printf("please input the true symbol(p or f or r)!\n\n");
+            continue;
+        }
+
+        schedule();
+    }
+}
